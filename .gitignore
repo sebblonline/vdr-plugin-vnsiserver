@@ -10,3 +10,10 @@ po/*.mo
 *.diff
 *.patch
 *.orig
+
+# project specific files
+vnsiserver.config
+vnsiserver.creator
+vnsiserver.files
+vnsiserver.includes
+
