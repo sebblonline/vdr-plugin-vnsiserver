@@ -181,17 +181,13 @@ void cVNSIStatus::Action(void)
     if (!cVNSIClient::InhibidDataUpdates())
     {
       // reset inactivity timeout as long as there are clients connected
-    for (auto& c : m_clients)
-    {
-      if(c.IsStreaming() || c.IsRecordingPlaying())
+      for (auto& c : m_clients)
       {
-        INFOLOG("Preventing shutdown, client %d is streaming", c.GetID());
-        ShutdownHandler.SetUserInactiveTimeout();
-      }
-  }
-      if (!m_clients.empty())
-      {
-        ShutdownHandler.SetUserInactiveTimeout();
+        if(c.IsStreaming() || c.IsRecordingPlaying())
+        {
+          INFOLOG("Preventing shutdown, client %d is streaming", c.GetID());
+          ShutdownHandler.SetUserInactiveTimeout();
+        }
       }
 
       // trigger clients to reload the modified channel list
