@@ -105,6 +105,9 @@ public:
 
   unsigned int GetID() { return m_Id; }
 
+  bool IsStreaming() const { return m_isStreaming; }
+  bool IsRecordingPlaying() const { return (nullptr != m_RecPlayer); }
+
 protected:
 
   void SetLoggedIn(bool yesNo) { m_loggedIn = yesNo; }
