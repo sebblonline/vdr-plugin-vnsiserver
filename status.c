@@ -191,9 +191,9 @@ void cVNSIStatus::Action(void)
       // reset inactivity timeout as long as there are clients connected
       for (auto& c : m_clients)
       {
-        if(c.IsStreaming() || c.IsRecordingPlaying())
+        if(c->IsStreaming() || c->IsRecordingPlaying())
         {
-          INFOLOG("Preventing shutdown, client %d is streaming", c.GetID());
+          INFOLOG("Preventing shutdown, client %d is streaming", c->GetID());
           ShutdownHandler.SetUserInactiveTimeout();
         }
       }
