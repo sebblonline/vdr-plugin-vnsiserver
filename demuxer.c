@@ -176,7 +176,7 @@ int cVNSIDemuxer::Read(sStreamPacket *packet, sStreamPacket *packet_side_data)
     else if (error < 0)
     {
       m_Error |= abs(error);
-      if (m_Error & ERROR_PES_SCRAMBLE)
+      if (m_Error & (ERROR_PES_SCRAMBLE | ERROR_TS_SCRAMBLE))
       {
         if (m_seenFirstPacket)
         {
@@ -354,10 +354,13 @@ bool cVNSIDemuxer::SeekTime(int64_t time)
 
 void cVNSIDemuxer::BufferStatus(bool &timeshift, uint32_t &start, uint32_t &end)
 {
+  cMutexLock lock(&m_Mutex);
+
   timeshift = m_VideoBuffer->HasBuffer();
 
   if (timeshift)
   {
+    m_VideoBuffer->GetBufferTime(m_endTime, m_wrapTime);
     if (!m_wrapTime)
     {
       start = m_refTime;

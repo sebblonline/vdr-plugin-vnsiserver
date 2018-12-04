@@ -89,18 +89,25 @@ void cVNSIClient::Action(void)
 
   while (Running())
   {
-    if (!m_socket.read((uint8_t*)&channelID, sizeof(uint32_t))) break;
-    channelID = ntohl(channelID);
+    if (!m_socket.read((uint8_t*)&channelID, sizeof(uint32_t)))
+      break;
 
+    channelID = ntohl(channelID);
     if (channelID == 1)
     {
-      if (!m_socket.read((uint8_t*)&requestID, sizeof(uint32_t), 10000)) break;
+      if (!m_socket.read((uint8_t*)&requestID, sizeof(uint32_t), 10000))
+        break;
+
       requestID = ntohl(requestID);
 
-      if (!m_socket.read((uint8_t*)&opcode, sizeof(uint32_t), 10000)) break;
+      if (!m_socket.read((uint8_t*)&opcode, sizeof(uint32_t), 10000))
+        break;
+
       opcode = ntohl(opcode);
 
-      if (!m_socket.read((uint8_t*)&dataLength, sizeof(uint32_t), 10000)) break;
+      if (!m_socket.read((uint8_t*)&dataLength, sizeof(uint32_t), 10000))
+        break;
+
       dataLength = ntohl(dataLength);
       if (dataLength > 200000) // a random sanity limit
       {
@@ -110,9 +117,12 @@ void cVNSIClient::Action(void)
 
       if (dataLength)
       {
-        try {
+        try
+        {
           data = new uint8_t[dataLength];
-        } catch (const std::bad_alloc &) {
+        }
+        catch (const std::bad_alloc &)
+        {
           ERRORLOG("Extra data buffer malloc error");
           break;
         }
@@ -134,14 +144,25 @@ void cVNSIClient::Action(void)
       if (!m_loggedIn && (opcode != VNSI_LOGIN))
       {
         ERRORLOG("Clients must be logged in before sending commands! Aborting.");
-        if (data) free(data);
+        if (data)
+          free(data);
         break;
       }
 
-      try {
+      if (opcode == VNSI_INVALIDATESOCKET)
+      {
+        cRequestPacket req(requestID, opcode, data, dataLength);
+        process_InvalidateSocket(req);
+        break;
+      }
+
+      try
+      {
         cRequestPacket req(requestID, opcode, data, dataLength);
         processRequest(req);
-      } catch (const std::exception &e) {
+      }
+      catch (const std::exception &e)
+      {
         ERRORLOG("%s", e.what());
         break;
       }
@@ -153,8 +174,8 @@ void cVNSIClient::Action(void)
     }
   }
 
-  /* If thread is ended due to closed connection delete a
-     possible running stream here */
+  // If thread is ended due to closed connection delete a
+  // possible running stream here
   StopChannelStreaming();
   m_ChannelScanControl.StopScan();
 
@@ -402,6 +423,10 @@ bool cVNSIClient::processRequest(cRequestPacket &req)
       result = process_StoreSetup(req);
       break;
 
+    case VNSI_GETSOCKET:
+      result = process_GetSocket(req);
+      break;
+
     /** OPCODE 20 - 39: VNSI network functions for live streaming */
     case VNSI_CHANNELSTREAM_OPEN:
       result = processChannelStream_Open(req);
@@ -413,6 +438,14 @@ bool cVNSIClient::processRequest(cRequestPacket &req)
 
     case VNSI_CHANNELSTREAM_SEEK:
       result = processChannelStream_Seek(req);
+      break;
+
+    case VNSI_CHANNELSTREAM_STATUS_SOCKET:
+      result = processChannelStream_StatusSocket(req);
+      break;
+
+    case VNSI_CHANNELSTREAM_STATUS_REQUEST:
+      result = processChannelStream_StatusRequest(req);
       break;
 
     /** OPCODE 40 - 59: VNSI network functions for recording streaming */
@@ -766,6 +799,28 @@ bool cVNSIClient::process_StoreSetup(cRequestPacket &req) /* OPCODE 9 */
   return true;
 }
 
+bool cVNSIClient::process_GetSocket(cRequestPacket &req) /* OPCODE 10 */
+{
+  cResponsePacket resp;
+  resp.init(req.getRequestID());
+  resp.add_S32(m_socket.GetHandle());
+  resp.add_U32(VNSI_RET_OK);
+  resp.finalise();
+  m_socket.write(resp.getPtr(), resp.getLen());
+  return true;
+}
+
+bool cVNSIClient::process_InvalidateSocket(cRequestPacket &req) /* OPCODE 11 */
+{
+  cResponsePacket resp;
+  resp.init(req.getRequestID());
+  resp.add_U32(VNSI_RET_OK);
+  resp.finalise();
+  m_socket.write(resp.getPtr(), resp.getLen());
+  m_socket.Invalidate();
+  return true;
+}
+
 /** OPCODE 20 - 39: VNSI network functions for live streaming */
 
 bool cVNSIClient::processChannelStream_Open(cRequestPacket &req) /* OPCODE 20 */
@@ -853,6 +908,34 @@ bool cVNSIClient::processChannelStream_Seek(cRequestPacket &req) /* OPCODE 22 */
   resp.add_U32(serial);
   resp.finalise();
   m_socket.write(resp.getPtr(), resp.getLen());
+  return true;
+}
+
+bool cVNSIClient::processChannelStream_StatusSocket(cRequestPacket &req) /* OPCODE 23 */
+{
+  cResponsePacket resp;
+  resp.init(req.getRequestID());
+
+  if (m_isStreaming && m_Streamer)
+  {
+    int32_t fd = req.extract_S32();
+    m_Streamer->AddStatusSocket(fd);
+    resp.add_U32(VNSI_RET_OK);
+  }
+  else
+    resp.add_U32(VNSI_RET_ERROR);
+
+  resp.finalise();
+  m_socket.write(resp.getPtr(), resp.getLen());
+  return true;
+}
+
+bool cVNSIClient::processChannelStream_StatusRequest(cRequestPacket &req) /* OPCODE 24 */
+{
+  if (m_isStreaming && m_Streamer)
+  {
+    m_Streamer->SendStatus();
+  }
   return true;
 }
 
@@ -3004,7 +3087,7 @@ bool cVNSIClient::processRECORDINGS_DELETED_Delete(cRequestPacket &req) /* OPCOD
   return true;
 }
 
-bool cVNSIClient::Undelete(cRecording* recording)
+bool cVNSIClient::Undelete(cRecording* recording, cRecordings* reclist, cRecordings* dellist)
 {
   DEBUGLOG("undelete recording: %s", recording->Name());
 
@@ -3062,17 +3145,9 @@ bool cVNSIClient::Undelete(cRecording* recording)
           OsdStatusMessage(*cString::sprintf("%s (%s)", tr("Error while accessing indexfile"), NewName));
         }
 
-#if VDRVERSNUM >= 20301
-        LOCK_RECORDINGS_WRITE;
-        LOCK_DELETEDRECORDINGS_WRITE;
-        DeletedRecordings->Del(recording);
-        Recordings->Update();
-        DeletedRecordings->Update();
-#else
-        DeletedRecordings.Del(recording);
-        Recordings.Update();
-        DeletedRecordings.Update();
-#endif
+        dellist->Del(recording);
+        reclist->Update();
+        dellist->Update();
       }
       else
       {
@@ -3099,6 +3174,7 @@ bool cVNSIClient::processRECORDINGS_DELETED_Undelete(cRequestPacket &req) /* OPC
     uint32_t uid = req.extract_U32();
 
 #if VDRVERSNUM >= 20301
+    LOCK_RECORDINGS_WRITE;
     LOCK_DELETEDRECORDINGS_WRITE;
     for (cRecording* recording = DeletedRecordings->First(); recording; recording = DeletedRecordings->Next(recording))
 #else
@@ -3108,7 +3184,11 @@ bool cVNSIClient::processRECORDINGS_DELETED_Undelete(cRequestPacket &req) /* OPC
     {
       if (uid == CreateStringHash(recording->FileName()))
       {
-        if (Undelete(recording))
+#if VDRVERSNUM >= 20301
+        if (Undelete(recording, Recordings, DeletedRecordings))
+#else
+        if (Undelete(recording, &Recordings, &DeletedRecordings))
+#endif
         {
           INFOLOG("Recording \"%s\" undeleted", recording->FileName());
           ret = VNSI_RET_OK;

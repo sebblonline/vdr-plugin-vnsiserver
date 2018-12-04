@@ -22,12 +22,11 @@
  *
  */
 
-#ifndef VNSI_DEMUXER_H
-#define VNSI_DEMUXER_H
+#pragma once
 
-#include <vdr/device.h>
-#include <queue>
 #include <vector>
+#include <cstddef>
+#include <stdint.h>
 
 #define DVD_TIME_BASE 1000000
 #define DVD_NOPTS_VALUE    (-1LL<<52) // should be possible to represent in both double and __int64
@@ -53,32 +52,32 @@
 #define ISO13522_STREAM   0xF3
 #define PROG_STREAM_DIR   0xFF
 
-inline bool PesIsHeader(const uchar *p)
+inline bool PesIsHeader(const unsigned char *p)
 {
   return !(p)[0] && !(p)[1] && (p)[2] == 1;
 }
 
-inline int PesHeaderLength(const uchar *p)
+inline int PesHeaderLength(const unsigned char *p)
 {
   return 8 + (p)[8] + 1;
 }
 
-inline bool PesIsVideoPacket(const uchar *p)
+inline bool PesIsVideoPacket(const unsigned char *p)
 {
   return (((p)[3] & ~VIDEO_STREAM_MASK) == VIDEO_STREAM);
 }
 
-inline bool PesIsMPEGAudioPacket(const uchar *p)
+inline bool PesIsMPEGAudioPacket(const unsigned char *p)
 {
   return (((p)[3] & ~AUDIO_STREAM_MASK) == AUDIO_STREAM);
 }
 
-inline bool PesIsPS1Packet(const uchar *p)
+inline bool PesIsPS1Packet(const unsigned char *p)
 {
   return ((p)[3] == PRIVATE_STREAM1 || (p)[3] == PRIVATE_STREAM3 );
 }
 
-inline bool PesIsAudioPacket(const uchar *p)
+inline bool PesIsAudioPacket(const unsigned char *p)
 {
   return (PesIsMPEGAudioPacket(p) || PesIsPS1Packet(p));
 }
@@ -155,7 +154,6 @@ public:
 
   bool AddPESPacket(uint8_t *data, int size);
   virtual void Parse(sStreamPacket *pkt, sStreamPacket *pkt_side_data) = 0;
-//  void ClearFrame() {m_PesBufferPtr = 0;}
   int ParsePacketHeader(uint8_t *data);
   int ParsePESHeader(uint8_t *buf, size_t len);
   virtual void Reset();
@@ -185,13 +183,14 @@ protected:
   int64_t     m_prevPTS;
   int64_t     m_prevDTS;
 
-  bool        m_IsPusi;
-  uint16_t    m_Error;
+  bool m_IsPusi;
+  uint16_t m_Error;
+  int m_scrambleCounter = 0;
 
-  cTSStream  *m_Stream;
-  bool        m_IsVideo;
-  sPtsWrap   *m_PtsWrap;
-  bool        m_ObservePtsWraps;
+  cTSStream *m_Stream;
+  bool m_IsVideo;
+  sPtsWrap *m_PtsWrap;
+  bool m_ObservePtsWraps;
 };
 
 
@@ -203,7 +202,6 @@ private:
   eStreamContent        m_streamContent;
   bool                  m_IsStreamChange;
 
-  bool                  m_pesError;
   cParser              *m_pesParser;
 
   char                  m_language[4];  // ISO 639 3-letter language code (empty string if undefined)
@@ -265,4 +263,3 @@ public:
   static int64_t Rescale(int64_t a, int64_t b, int64_t c);
 };
 
-#endif // VNSI_DEMUXER_H

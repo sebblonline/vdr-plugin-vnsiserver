@@ -27,17 +27,23 @@
 #include <sys/ioctl.h>
 #include <time.h>
 
-#include <vdr/channels.h>
-#include <vdr/eitscan.h>
+// work-around for VDR's tools.h
+#if VDRVERSNUM < 20400
+#define __STL_CONFIG_H 1
+#else
+#define DISABLE_TEMPLATES_COLLIDING_WITH_STL 1
+#endif
+#include "streamer.h"
 
 #include "config.h"
-#include "streamer.h"
 #include "cxsocket.h"
 #include "vnsicommand.h"
 #include "responsepacket.h"
 #include "vnsi.h"
 #include "videobuffer.h"
 
+#include <vdr/channels.h>
+#include <vdr/eitscan.h>
 
 // --- cLiveStreamer -------------------------------------------------
 
@@ -217,18 +223,20 @@ void cLiveStreamer::Action(void)
         {
           m_refTime = pkt_data.reftime;
           m_refDTS = pkt_data.dts;
+          m_curDTS = (pkt_data.dts - m_refDTS) / DVD_TIME_BASE + m_refTime;
           if (m_protocolVersion >= 11)
           {
-            sendStreamTimes(pkt_data);
+            sendStreamTimes();
             bufferStatsTimer.Set(1000);
           }
           else
             sendRefTime(pkt_data);
           pkt_data.reftime = 0;
         }
+        m_curDTS = (pkt_data.dts - m_refDTS) / DVD_TIME_BASE + m_refTime;
         if (bufferStatsTimer.TimedOut())
         {
-          sendStreamTimes(pkt_data);
+          sendStreamTimes();
           bufferStatsTimer.Set(1000);
         }
         sendStreamPacket(&pkt_data);
@@ -246,7 +254,7 @@ void cLiveStreamer::Action(void)
       }
 
       // send signal info every 10 sec.
-      if(last_info.TimedOut())
+      if (last_info.TimedOut())
       {
         last_info.Set(10000);
         sendSignalInfo();
@@ -369,10 +377,10 @@ inline void cLiveStreamer::Activate(bool On)
 
 void cLiveStreamer::sendStreamPacket(sStreamPacket *pkt)
 {
-  if(pkt == NULL)
+  if (pkt == NULL)
     return;
 
-  if(pkt->size == 0)
+  if (pkt->size == 0)
     return;
 
   m_streamHeader.initStream(VNSI_STREAM_MUXPKT, pkt->id, pkt->duration, pkt->pts, pkt->dts, pkt->serial);
@@ -563,7 +571,11 @@ void cLiveStreamer::sendSignalInfo()
     resp.add_U32(0);
 
     resp.finaliseStream();
-    m_Socket->write(resp.getPtr(), resp.getLen());
+
+    if (m_statusSocket)
+      m_statusSocket->write(resp.getPtr(), resp.getLen());
+    else
+      m_Socket->write(resp.getPtr(), resp.getLen());
     return;
   }
 
@@ -604,7 +616,11 @@ void cLiveStreamer::sendSignalInfo()
       resp.add_U32(0);
 
       resp.finaliseStream();
-      m_Socket->write(resp.getPtr(), resp.getLen());
+
+      if (m_statusSocket)
+        m_statusSocket->write(resp.getPtr(), resp.getLen());
+      else
+        m_Socket->write(resp.getPtr(), resp.getLen());
     }
   }
   else
@@ -752,7 +768,11 @@ void cLiveStreamer::sendSignalInfo()
       resp.add_U32(fe_unc);
 
       resp.finaliseStream();
-      m_Socket->write(resp.getPtr(), resp.getLen());
+
+      if (m_statusSocket)
+        m_statusSocket->write(resp.getPtr(), resp.getLen());
+      else
+        m_Socket->write(resp.getPtr(), resp.getLen());
     }
   }
 }
@@ -764,7 +784,12 @@ void cLiveStreamer::sendStreamStatus()
   uint16_t error = m_Demuxer.GetError();
   if (error & ERROR_PES_SCRAMBLE)
   {
-    INFOLOG("Channel: scrambled %d", error);
+    INFOLOG("Channel: scrambled (PES) %d", error);
+    resp.add_String(cString::sprintf("Channel: scrambled (%d)", error));
+  }
+  else if (error & ERROR_TS_SCRAMBLE)
+  {
+    INFOLOG("Channel: scrambled (TS) %d", error);
     resp.add_String(cString::sprintf("Channel: scrambled (%d)", error));
   }
   else if (error & ERROR_PES_STARTCODE)
@@ -784,10 +809,14 @@ void cLiveStreamer::sendStreamStatus()
   }
 
   resp.finaliseStream();
-  m_Socket->write(resp.getPtr(), resp.getLen());
+
+  if (m_statusSocket)
+    m_statusSocket->write(resp.getPtr(), resp.getLen());
+  else
+    m_Socket->write(resp.getPtr(), resp.getLen());
 }
 
-void cLiveStreamer::sendStreamTimes(sStreamPacket &pkt)
+void cLiveStreamer::sendStreamTimes()
 {
   if (m_Channel == NULL)
     return;
@@ -797,7 +826,7 @@ void cLiveStreamer::sendStreamTimes(sStreamPacket &pkt)
 
   time_t starttime = m_refTime;
   int64_t refDTS = m_refDTS;
-  time_t current = (pkt.dts - m_refDTS) / DVD_TIME_BASE + m_refTime;
+  time_t current = m_curDTS;
 
   {
 #if VDRVERSNUM >= 20301
@@ -821,8 +850,8 @@ void cLiveStreamer::sendStreamTimes(sStreamPacket &pkt)
   }
   uint32_t start, end;
   bool timeshift;
-  int64_t mintime = pkt.dts;
-  int64_t maxtime = pkt.dts;
+  int64_t mintime = current;
+  int64_t maxtime = current;
   m_Demuxer.BufferStatus(timeshift, start, end);
   if (timeshift)
   {
@@ -836,7 +865,11 @@ void cLiveStreamer::sendStreamTimes(sStreamPacket &pkt)
   resp.add_U64(mintime);
   resp.add_U64(maxtime);
   resp.finaliseStream();
-  m_Socket->write(resp.getPtr(), resp.getLen());
+
+  if (m_statusSocket)
+    m_statusSocket->write(resp.getPtr(), resp.getLen());
+  else
+    m_Socket->write(resp.getPtr(), resp.getLen());
 }
 
 void cLiveStreamer::sendBufferStatus()
@@ -877,4 +910,14 @@ void cLiveStreamer::RetuneChannel(const cChannel *channel)
 
   INFOLOG("re-tune to channel %s", m_Channel->Name());
   m_VideoInput.RequestRetune();
+}
+
+void cLiveStreamer::AddStatusSocket(int fd)
+{
+  m_statusSocket.reset(new cxSocket(fd));
+}
+
+void cLiveStreamer::SendStatus()
+{
+  sendStreamTimes();
 }
